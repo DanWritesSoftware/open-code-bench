@@ -101,7 +101,7 @@ model_list:
       rpm: 600            # tune to vLLM capacity
   - model_name: qwen-pi-1.5b
     litellm_params:
-      model: ollama/qwen2.5-coder:1.5b
+      model: ollama_chat/qwen2.5-coder:1.5b   # ollama_chat -> /api/chat, applies the model's chat template
       api_base: http://pi.lan:11434
       rpm: 30             # Pi is slow; keep concurrency low
   - model_name: claude-sonnet

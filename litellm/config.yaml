@@ -1,0 +1,34 @@
+# open-code-bench — LiteLLM gateway (Phase 0)
+# Single backend for now: Qwen-Coder on the Raspberry Pi via Ollama, LAN-bound at
+# http://172.18.70.178:11434. Adding a model later = another model_list entry.
+#
+# VALIDITY NOTES (Phase-0 review + docs/ARCHITECTURE.md D8/D12/D15). These are
+# RUNNER-owned and intentionally NOT defaulted here — the harness sends them per run
+# and records them in the manifest:
+#   * temperature=0 for pass@1 (Ollama's built-in default is 0.8); per-sample seeds for
+#     pass@k (D8). The Modelfile bakes in NO sampling params, so the default applies
+#     unless the request overrides it.
+#   * an EXPLICIT system message — with none, Ollama injects Qwen's default
+#     ("You are Qwen, created by Alibaba Cloud..."), which changes comparability.
+#   * a generous max_tokens; record finish_reason ("length" == truncation / infra, NOT a
+#     wrong answer — D12).
+#   * (under review) num_ctx — Ollama's small default context window can silently truncate
+#     long prompts; pin it once we confirm LiteLLM forwards it.
+# drop_params is on, so an unsupported/typo'd param is dropped SILENTLY: the harness must
+# VERIFY sampling took effect (e.g. a same-prompt-twice determinism check), not assume.
+# Provenance (D15) records model + quant: qwen2.5-coder:1.5b @ Q4_K_M + Ollama version.
+
+model_list:
+  - model_name: qwen-pi-1.5b                       # logical name benchmarks target
+    litellm_params:
+      model: ollama_chat/qwen2.5-coder:1.5b        # ollama_chat -> /api/chat (applies ChatML template)
+      api_base: http://172.18.70.178:11434         # no /v1 suffix: correct for /api/chat
+      rpm: 30                                       # Pi is CPU (concurrency 1-2) — re-added from doc §4
+
+litellm_settings:
+  drop_params: true        # cross-provider robustness; see the VERIFY caveat above
+  request_timeout: 600     # the Pi is slow; allow long generations
+
+# No master_key: the proxy is open, which is safe ONLY with the 127.0.0.1 bind
+# (serve-gateway.ps1 default). When cloud keys arrive, add general_settings.master_key
+# + virtual keys and never bind 0.0.0.0 (D4).

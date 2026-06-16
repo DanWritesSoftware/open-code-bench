@@ -1,0 +1,16 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Environment / secrets
+.env
+*.local
+
+# Run artifacts (Postgres is the system of record; these are exports)
+runs/
+
+# OS cruft
+.DS_Store
+Thumbs.db
