@@ -7,8 +7,6 @@
 #
 # These are the DIRECT dependencies the project imports/runs. Transitive packages
 # (fastapi/uvicorn for the proxy, numpy for evalplus, etc.) are resolved by pip.
-# For an exact byte-for-byte lock of every transitive version, regenerate with:
-#   .venv\Scripts\python -m pip freeze > requirements.lock.txt
 
 # LiteLLM proxy/gateway — the OpenAI-compatible front door.
 # Launch:  $env:PYTHONUTF8='1'; .venv\Scripts\litellm --config litellm\config.yaml ...
