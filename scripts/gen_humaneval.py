@@ -75,8 +75,13 @@ def dataset_hash(problems: dict) -> str:
     return hashlib.sha256(blob).hexdigest()
 
 
-def backend_info() -> dict:
-    """Best-effort: ask the Pi's Ollama for the model details (quant) — provenance (D15)."""
+def backend_info(model: str) -> dict:
+    """Best-effort backend provenance (D15). Pi/Ollama: query /api/show for the quant.
+    Other backends (e.g. vLLM on the Spark): record a generic note — dtype/quant are set
+    by the server's launch args, not queried here."""
+    if not model.startswith("qwen-pi"):
+        return {"server": "vllm", "served_model_logical": model,
+                "note": "served via vLLM; dtype/quant set at vLLM launch"}
     try:
         import urllib.request
         req = urllib.request.Request(
@@ -86,13 +91,14 @@ def backend_info() -> dict:
         )
         with urllib.request.urlopen(req, timeout=10) as r:
             d = json.load(r)
-        return {"ollama_model": "qwen2.5-coder:1.5b", "details": d.get("details")}
+        return {"server": "ollama", "ollama_model": "qwen2.5-coder:1.5b", "details": d.get("details")}
     except Exception as e:
-        return {"ollama_model": "qwen2.5-coder:1.5b", "quantization_level": "Q4_K_M (assumed)", "error": str(e)}
+        return {"server": "ollama", "ollama_model": "qwen2.5-coder:1.5b", "quantization_level": "Q4_K_M (assumed)", "error": str(e)}
 
 
 def main() -> None:
     ap = argparse.ArgumentParser()
+    ap.add_argument("--model", default=MODEL, help="gateway logical model name (e.g. qwen-pi-1.5b, qwen-spark-7b)")
     ap.add_argument("--limit", type=int, default=5, help="number of problems (0 = all 164)")
     ap.add_argument("--max-tokens", type=int, default=768)
     ap.add_argument("--temperature", type=float, default=0.0)
@@ -118,8 +124,8 @@ def main() -> None:
         "dataset_size_total": len(problems),
         "dataset_size_run": len(task_ids),
         "dataset_hash": dataset_hash(problems),   # full-problem hash (covers plus_input)
-        "model_logical": MODEL,
-        "backend": backend_info(),
+        "model_logical": args.model,
+        "backend": backend_info(args.model),
         "sampling": {"temperature": args.temperature, "max_tokens": args.max_tokens},
         "options": {"num_ctx": args.num_ctx},
         "system_prompt": SYSTEM_PROMPT,
@@ -128,7 +134,7 @@ def main() -> None:
         "created_utc": datetime.now(timezone.utc).isoformat(),
     }
     (out / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
-    print(f"run_id={run_id}  ->  {out}")
+    print(f"run_id={run_id}  model={args.model}  ->  {out}")
     print(f"backend: {manifest['backend']}")
     print(f"generating {len(task_ids)} task(s) @ temp={args.temperature}, "
           f"max_tokens={args.max_tokens}, num_ctx={args.num_ctx}\n")
@@ -142,7 +148,7 @@ def main() -> None:
         t0 = time.time()
         try:
             r = client.chat.completions.create(
-                model=MODEL,
+                model=args.model,
                 temperature=args.temperature,
                 max_tokens=args.max_tokens,
                 messages=[
@@ -153,7 +159,7 @@ def main() -> None:
                     "num_ctx": args.num_ctx,
                     "metadata": {
                         "run_id": run_id, "benchmark": BENCHMARK,
-                        "task_id": tid, "sample_index": 0, "model_logical": MODEL,
+                        "task_id": tid, "sample_index": 0, "model_logical": args.model,
                     },
                 },
             )
