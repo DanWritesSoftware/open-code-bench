@@ -37,6 +37,15 @@ if (-not (Test-Path $Config)) {
 # Required on Windows: see .DESCRIPTION above.
 $env:PYTHONUTF8 = '1'
 
+# Load .env (gitignored) so config refs like `os.environ/OLLAMA_PI_BASE` resolve without
+# hardcoding host IPs in the repo. Copy .env.example -> .env and fill in your values.
+$EnvFile = Join-Path $RepoRoot '.env'
+if (Test-Path $EnvFile) {
+    Get-Content $EnvFile | ForEach-Object {
+        if ($_ -match '^\s*([^#=\s]+)\s*=\s*(.+?)\s*$') { Set-Item -Path "Env:\$($matches[1])" -Value $matches[2] }
+    }
+}
+
 Write-Host "Starting LiteLLM gateway on http://${BindHost}:${Port}"
 Write-Host "  config: $Config"
 & $LiteLLM --config $Config --host $BindHost --port $Port

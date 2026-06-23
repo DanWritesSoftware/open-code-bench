@@ -11,6 +11,9 @@ __pycache__/
 # Run artifacts (Postgres is the system of record; these are exports)
 runs/
 
+# Internal docs (design + working notes)
+docs/
+
 # OS cruft
 .DS_Store
 Thumbs.db

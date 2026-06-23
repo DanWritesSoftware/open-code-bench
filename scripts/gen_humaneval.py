@@ -23,6 +23,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import subprocess
 import time
 from datetime import datetime, timezone
@@ -30,10 +31,18 @@ from pathlib import Path
 
 from openai import OpenAI
 
+# Load local-only config (.env, gitignored) so OLLAMA_PI_BASE resolves without hardcoding
+# a host IP in the repo. python-dotenv ships with litellm; degrade gracefully if absent.
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except Exception:
+    pass
+
 GATEWAY = "http://localhost:4000/v1"
 MODEL = "qwen-pi-1.5b"          # gateway logical name (routes to Pi Ollama)
 BENCHMARK = "humaneval_plus"
-OLLAMA_DIRECT = "http://172.18.70.178:11434"   # for backend provenance only
+OLLAMA_DIRECT = os.environ.get("OLLAMA_PI_BASE", "http://pi.lan:11434")   # backend provenance only; from .env
 
 SYSTEM_PROMPT = (
     "You are an expert Python programmer. Complete the given function. "
