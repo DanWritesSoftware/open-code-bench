@@ -25,6 +25,7 @@ import hashlib
 import json
 import os
 import subprocess
+import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -103,6 +104,7 @@ def main() -> None:
     ap.add_argument("--max-tokens", type=int, default=768)
     ap.add_argument("--temperature", type=float, default=0.0)
     ap.add_argument("--num-ctx", type=int, default=8192, help="Ollama context window (avoid silent truncation)")
+    ap.add_argument("--concurrency", type=int, default=1, help="concurrent in-flight requests (>1 lets vLLM batch; keep 1 for the Pi)")
     args = ap.parse_args()
 
     from evalplus.data import get_human_eval_plus
@@ -144,7 +146,13 @@ def main() -> None:
     samples_f = (out / "samples.jsonl").open("w", encoding="utf-8")
 
     n_ok = n_len = n_err = 0
-    for i, tid in enumerate(task_ids, 1):
+    write_lock = threading.Lock()
+
+    def gen_one(tid):
+        """Generate one solution and thread-safely write its record + sample. Returns gen_status.
+        Writes are serialized; completion-order in the files is fine — scoring keys by task_id and
+        each task has a single sample (sample_index 0)."""
+        nonlocal n_ok, n_len, n_err
         t0 = time.time()
         try:
             r = client.chat.completions.create(
@@ -166,12 +174,7 @@ def main() -> None:
             dt = time.time() - t0
             ch = r.choices[0]
             content = ch.message.content or ""
-            if ch.finish_reason == "length":
-                n_len += 1
-                gen_status = "truncated"   # cut off by max_tokens: NOT a clean answer.
-            else:                          # #3 scoring must bucket this apart from a
-                n_ok += 1                  # genuine wrong answer (D12 infra-vs-model).
-                gen_status = "ok"
+            gen_status = "truncated" if ch.finish_reason == "length" else "ok"  # length == cut off
             rec = {
                 "run_id": run_id, "task_id": tid, "sample_index": 0,
                 "gen_status": gen_status, "finish_reason": ch.finish_reason,
@@ -180,24 +183,37 @@ def main() -> None:
                 "latency_s": round(dt, 2),
                 "raw_completion": content,
             }
-            # EvalPlus reads {task_id, solution}; we store the RAW completion here and let
-            # step #3 run evalplus.sanitize (strip ```python fences) before scoring.
-            # Truncated solutions are still written, but flagged gen_status='truncated' in
-            # records.jsonl so #3 buckets them apart from genuine wrong answers.
-            samples_f.write(json.dumps({"task_id": tid, "solution": content}) + "\n")
-            print(f"[{i}/{len(task_ids)}] {tid}: {ch.finish_reason}, "
-                  f"{r.usage.completion_tokens} tok, {dt:.1f}s")
+            sample = {"task_id": tid, "solution": content}   # raw; #3 runs evalplus.sanitize
         except Exception as e:
             dt = time.time() - t0
-            n_err += 1
+            gen_status = "infra_error"
             rec = {
                 "run_id": run_id, "task_id": tid, "sample_index": 0,
                 "gen_status": "infra_error", "error": repr(e), "latency_s": round(dt, 2),
             }
-            print(f"[{i}/{len(task_ids)}] {tid}: INFRA ERROR -> {e}")
-        records_f.write(json.dumps(rec) + "\n")
-        records_f.flush()
-        samples_f.flush()
+            sample = None
+        with write_lock:
+            if gen_status == "ok":
+                n_ok += 1
+            elif gen_status == "truncated":
+                n_len += 1
+            else:
+                n_err += 1
+            records_f.write(json.dumps(rec) + "\n"); records_f.flush()
+            if sample is not None:
+                samples_f.write(json.dumps(sample) + "\n"); samples_f.flush()
+            done = n_ok + n_len + n_err
+            print(f"[{done}/{len(task_ids)}] {tid}: {gen_status}, "
+                  f"{rec.get('completion_tokens', '-')} tok, {rec['latency_s']}s")
+        return gen_status
+
+    if args.concurrency > 1:
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=args.concurrency) as ex:
+            list(ex.map(gen_one, task_ids))   # vLLM batches the in-flight requests
+    else:
+        for tid in task_ids:
+            gen_one(tid)
 
     records_f.close()
     samples_f.close()

@@ -11,11 +11,13 @@ A [LiteLLM](https://docs.litellm.ai/) proxy presents a single OpenAI-compatible 
 |---|---|---|---|---|---|
 | qwen2.5-coder:1.5b (Q4_K_M) | Raspberry Pi 5 · Ollama | HumanEval+ | **0.610** | 0.665 | 164/164 |
 | qwen2.5-coder:7b | DGX Spark · vLLM (GB10) | HumanEval+ | **0.823** | 0.872 | 164/164 |
+| qwen2.5-coder:32b | DGX Spark · vLLM (GB10) | HumanEval+ | **0.866** | 0.909 | 164/164 |
 
 <sub>pass@1 = HumanEval+ (base + extra tests); *base pass@1* = original HumanEval tests only. temp=0
 (greedy), single sample. Self-hosted backends — wall cost not metered. Dataset: HumanEvalPlus
-v0.1.10 (`fe585eb4…`), EvalPlus 0.3.1. Runs: `heplus_20260623T163736Z` (Pi),
-`heplus_20260623T214900Z` (Spark). Completeness = fairly-attempted / total (no infra/truncation).</sub>
+v0.1.10 (`fe585eb4…`), EvalPlus 0.3.1. Runs: `heplus_20260623T163736Z` (Pi 1.5B),
+`heplus_20260623T214900Z` (Spark 7B), `heplus_20260623T230559Z` (Spark 32B). Completeness =
+fairly-attempted / total (no infra/truncation).</sub>
 
 
 ## How it works

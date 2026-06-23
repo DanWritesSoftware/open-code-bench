@@ -29,6 +29,10 @@ model_list:
     litellm_params:
       model: hosted_vllm/qwen-coder-7b             # must match the vLLM --served-model-name
       api_base: os.environ/SPARK_VLLM_BASE         # Spark vLLM OpenAI base URL from .env (incl. /v1)
+  - model_name: qwen-spark-32b                     # Qwen2.5-Coder-32B via vLLM on the DGX Spark
+    litellm_params:
+      model: hosted_vllm/qwen-coder-32b            # must match the vLLM --served-model-name
+      api_base: os.environ/SPARK_VLLM_BASE         # same Spark vLLM endpoint (:8000)
 
 litellm_settings:
   drop_params: true        # cross-provider robustness; see the VERIFY caveat above
