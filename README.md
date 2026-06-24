@@ -81,6 +81,7 @@ runs/                      per-run artifacts + provenance (gitignored)
 python -m venv .venv
 .venv\Scripts\python -m pip install -r requirements.txt   # Windows
 # .venv/bin/python  -m pip install -r requirements.txt    # Linux/macOS
+.venv\Scripts\python -m pip install -e . --no-deps         # editable install of the `ocb` package
 ```
 
 On Windows, set `PYTHONUTF8=1` before running the gateway or scripts (LiteLLM's startup banner

@@ -21,16 +21,15 @@ Run:  .venv\\Scripts\\python.exe scripts\\gen_humaneval.py --limit 5
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
-import subprocess
 import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from openai import OpenAI
+from ocb.gateway.client import GatewayClient
+from ocb.provenance import dataset_hash, git_commit
 
 # Load local-only config (.env, gitignored) so OLLAMA_PI_BASE resolves without hardcoding
 # a host IP in the repo. python-dotenv ships with litellm; degrade gracefully if absent.
@@ -56,24 +55,6 @@ def build_user_prompt(problem: dict) -> str:
         "Complete the following Python function. Return the full function in a single "
         "```python code block.\n\n" + problem["prompt"]
     )
-
-
-def git_commit() -> str | None:
-    try:
-        return subprocess.check_output(
-            ["git", "rev-parse", "HEAD"], text=True, stderr=subprocess.DEVNULL
-        ).strip()
-    except Exception:
-        return None
-
-
-def dataset_hash(problems: dict) -> str:
-    # Hash the FULL problem (prompt + base_input + plus_input + test + entry_point + ...),
-    # NOT just the prompt: the "+" in HumanEval+ is the EXTRA test inputs. A prompt-only
-    # hash wouldn't change if EvalPlus revised plus_input -> false reproducibility.
-    blob = json.dumps({k: problems[k] for k in sorted(problems)},
-                      sort_keys=True, default=str).encode()
-    return hashlib.sha256(blob).hexdigest()
 
 
 def backend_info(model: str) -> dict:
@@ -141,7 +122,7 @@ def main() -> None:
     print(f"generating {len(task_ids)} task(s) @ temp={args.temperature}, "
           f"max_tokens={args.max_tokens}, num_ctx={args.num_ctx}\n")
 
-    client = OpenAI(base_url=GATEWAY, api_key="sk-noauth")
+    client = GatewayClient(GATEWAY)
     records_f = (out / "records.jsonl").open("w", encoding="utf-8")
     samples_f = (out / "samples.jsonl").open("w", encoding="utf-8")
 
@@ -155,41 +136,30 @@ def main() -> None:
         nonlocal n_ok, n_len, n_err
         t0 = time.time()
         try:
-            r = client.chat.completions.create(
-                model=args.model,
-                temperature=args.temperature,
-                max_tokens=args.max_tokens,
+            comp = client.complete(
                 messages=[
                     {"role": "system", "content": SYSTEM_PROMPT},
                     {"role": "user", "content": build_user_prompt(problems[tid])},
                 ],
-                extra_body={
-                    "num_ctx": args.num_ctx,
-                    "metadata": {
-                        "run_id": run_id, "benchmark": BENCHMARK,
-                        "task_id": tid, "sample_index": 0, "model_logical": args.model,
-                    },
-                },
+                model=args.model, temperature=args.temperature, max_tokens=args.max_tokens,
+                run_id=run_id, benchmark=BENCHMARK, task_id=tid, sample_index=0,
+                num_ctx=args.num_ctx,
             )
-            dt = time.time() - t0
-            ch = r.choices[0]
-            content = ch.message.content or ""
-            gen_status = "truncated" if ch.finish_reason == "length" else "ok"  # length == cut off
+            gen_status = "truncated" if comp.finish_reason == "length" else "ok"  # length == cut off
             rec = {
                 "run_id": run_id, "task_id": tid, "sample_index": 0,
-                "gen_status": gen_status, "finish_reason": ch.finish_reason,
-                "prompt_tokens": r.usage.prompt_tokens,
-                "completion_tokens": r.usage.completion_tokens,
-                "latency_s": round(dt, 2),
-                "raw_completion": content,
+                "gen_status": gen_status, "finish_reason": comp.finish_reason,
+                "prompt_tokens": comp.prompt_tokens,
+                "completion_tokens": comp.completion_tokens,
+                "latency_s": comp.latency_s,
+                "raw_completion": comp.content,
             }
-            sample = {"task_id": tid, "solution": content}   # raw; #3 runs evalplus.sanitize
+            sample = {"task_id": tid, "solution": comp.content}   # raw; #3 runs evalplus.sanitize
         except Exception as e:
-            dt = time.time() - t0
             gen_status = "infra_error"
             rec = {
                 "run_id": run_id, "task_id": tid, "sample_index": 0,
-                "gen_status": "infra_error", "error": repr(e), "latency_s": round(dt, 2),
+                "gen_status": "infra_error", "error": repr(e), "latency_s": round(time.time() - t0, 2),
             }
             sample = None
         with write_lock:

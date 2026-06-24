@@ -1,0 +1,14 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "open-code-bench"
+version = "0.1.0"
+description = "Run coding benchmarks against multiple LLM backends through one gateway."
+requires-python = ">=3.11"
+# Runtime deps are pinned in requirements.txt (D15). Install the package editable with
+# `--no-deps` so this file doesn't re-resolve them:  pip install -e . --no-deps
+
+[tool.setuptools.packages.find]
+where = ["src"]

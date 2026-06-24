@@ -32,10 +32,11 @@ from __future__ import annotations
 
 import argparse
 import json
-import shlex
 import subprocess
 import sys
 from pathlib import Path
+
+from ocb.sandbox.runner import SandboxRunner
 
 SANITIZED_NAME = "samples-sanitized.jsonl"
 RESULT_NAME = "samples-sanitized_eval_results.json"   # evalplus: <samples>.jsonl -> <samples>_eval_results.json
@@ -75,9 +76,9 @@ def sanitize(run_dir: Path, py: str) -> Path:
     return out
 
 
-def build_docker_argv(image: str, work_mount: str, args, dataset: str) -> list[str]:
-    """The hardened `docker run` invocation (D11). `work_mount` is the host dir bind-mounted
-    to /work; it holds samples-sanitized.jsonl in and <...>_eval_results.json out."""
+def build_inner_cmd(args, dataset: str) -> list[str]:
+    """The evalplus.evaluate command run INSIDE the sandbox container (HumanEval+-specific).
+    The hardened `docker run` flags that wrap it live in SandboxRunner (D11)."""
     inner = ["timeout", f"{args.timeout}s",
              "python", "-m", "evalplus.evaluate", dataset,
              "--samples", f"/work/{SANITIZED_NAME}"]
@@ -85,52 +86,22 @@ def build_docker_argv(image: str, work_mount: str, args, dataset: str) -> list[s
         inner += ["--parallel", str(args.parallel)]
     if args.base_only:
         inner.append("--base_only")
-    return [
-        "docker", "run", "--rm",
-        "--network=none",                 # untrusted code gets no network
-        "--cap-drop=ALL",                 # drop every Linux capability
-        "--security-opt=no-new-privileges",
-        "--read-only",                    # immutable rootfs; dataset + ground-truth are pre-baked
-        "--tmpfs", "/tmp:rw,size=512m",   # writable scratch for evalplus temp dirs
-        "--pids-limit", str(args.pids_limit),
-        "--cpus", str(args.cpus),
-        "--memory", args.memory,
-        "-v", f"{work_mount}:/work",
-        image,
-        *inner,
-    ]
+    return inner
 
 
-def run_steps(steps: list[list[str]], dry_run: bool) -> None:
-    for argv in steps:
-        printable = " ".join(shlex.quote(a) for a in argv)
-        print(f"  $ {printable}")
-        if not dry_run:
-            subprocess.run(argv, check=True)
+def _runner(args) -> SandboxRunner:
+    return SandboxRunner(args.image, cpus=args.cpus, memory=args.memory,
+                         pids_limit=args.pids_limit, ssh_host=args.ssh_host,
+                         ssh_workdir=args.ssh_workdir, local=args.local, dry_run=args.dry_run)
 
 
 def evaluate_local(run_dir: Path, args, dataset: str) -> None:
-    argv = build_docker_argv(args.image, str(run_dir.resolve()), args, dataset)
-    print("[evaluate] local Docker:")
-    run_steps([argv], args.dry_run)
+    _runner(args).run_local(run_dir, build_inner_cmd(args, dataset))
 
 
 def evaluate_ssh(run_dir: Path, args, dataset: str) -> None:
-    host = args.ssh_host
-    remote = f"{args.ssh_workdir.rstrip('/')}/ocb-score-{run_dir.name}"
-    local_samples = run_dir / SANITIZED_NAME
-    local_result = run_dir / RESULT_NAME
-    docker_argv = build_docker_argv(args.image, remote, args, dataset)
-    docker_cmd = " ".join(shlex.quote(a) for a in docker_argv)
-    print(f"[evaluate] T14 sandbox over SSH: {host}  (remote work dir: {remote})")
-    steps = [
-        ["ssh", host, f"mkdir -p {shlex.quote(remote)} && chmod 777 {shlex.quote(remote)}"],
-        ["scp", str(local_samples), f"{host}:{remote}/{SANITIZED_NAME}"],
-        ["ssh", host, docker_cmd],
-        ["scp", f"{host}:{remote}/{RESULT_NAME}", str(local_result)],
-        ["ssh", host, f"rm -rf {shlex.quote(remote)}"],
-    ]
-    run_steps(steps, args.dry_run)
+    _runner(args).run_ssh(run_dir, build_inner_cmd(args, dataset),
+                          in_files=[SANITIZED_NAME], out_files=[RESULT_NAME])
 
 
 def merge_and_score(run_dir: Path, dataset: str, base_only: bool) -> dict:
