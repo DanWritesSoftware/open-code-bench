@@ -1,0 +1,17 @@
+# HumanEval+ run spec (ARCHITECTURE.md §5.6). Drive it with:
+#   generate (on the Pi/Spark network):  python -m ocb.runner.run generate specs/heplus.yaml
+#   score    (on the Mint network):       python -m ocb.runner.run score runs/<run_id> --ssh-host sandbox
+#
+# Set PYTHONUTF8=1 on Windows; start the gateway first (scripts/serve-gateway.ps1).
+benchmark: humaneval_plus
+models:
+  - qwen-pi-1.5b
+  - qwen-spark-7b
+  - qwen-spark-32b
+sampling:
+  temperature: 0.0
+  max_tokens: 768
+  num_ctx: 8192          # Ollama-only; dropped for vLLM/cloud via the gateway's drop_params
+limit: 0                 # 0 = all 164 tasks; set e.g. 5 for a smoke test
+concurrency: 1           # >1 lets vLLM batch the in-flight requests (keep 1 for the Pi)
+gateway: http://localhost:4000/v1
