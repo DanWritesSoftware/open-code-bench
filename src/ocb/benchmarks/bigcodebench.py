@@ -160,7 +160,9 @@ class BigCodeBench(Benchmark):
             entries = eval_by_task.get(tid)
             if not entries:
                 rows.append({**rec, "eval_status": "sandbox_error", "passed": None}); continue
-            entry = entries[idx] if isinstance(entries, list) and idx < len(entries) else entries
+            if isinstance(entries, list) and idx >= len(entries):
+                rows.append({**rec, "eval_status": "sandbox_error", "passed": None}); continue
+            entry = entries[idx] if isinstance(entries, list) else entries
             passed = status_of(entry) == "pass"
             n_scored += 1
             if gs == "ok":

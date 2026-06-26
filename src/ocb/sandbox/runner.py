@@ -53,16 +53,17 @@ class SandboxRunner:
         argv += ["-v", f"{work_mount}:/work", self.image, *inner_cmd]
         return argv
 
-    def _run_steps(self, steps: list[list[str]]) -> None:
+    def _run_steps(self, steps: list[list[str]], *, stdin_data: bytes | None = None) -> None:
         for argv in steps:
             print("  $ " + " ".join(shlex.quote(a) for a in argv))
             if not self.dry_run:
-                subprocess.run(argv, check=True)
+                subprocess.run(argv, check=True, input=stdin_data)
 
     def run_local(self, work_dir: Path, inner_cmd: list[str], env: dict | None = None) -> None:
         argv = self.build_docker_argv(str(work_dir.resolve()), inner_cmd, env)
         print("[sandbox] local Docker:")
-        self._run_steps([argv])
+        stdin_data = b"y\n" * 100 if self.auto_confirm else None
+        self._run_steps([argv], stdin_data=stdin_data)
 
     def run_ssh(self, work_dir: Path, inner_cmd: list[str], *,
                 in_files: list[str], out_files: list[str], env: dict | None = None) -> None:
