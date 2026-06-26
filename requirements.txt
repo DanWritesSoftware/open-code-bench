@@ -18,3 +18,7 @@ openai==2.42.0
 
 # EvalPlus — HumanEval+ dataset loader, sanitizer, and evaluator (generation + scoring).
 evalplus==0.3.1
+
+# BigCodeBench — second benchmark (dataset loader + sanitize + evaluator). The ~139 task
+# libraries live in the official bigcodebench/bigcodebench-evaluate Docker image, not here.
+bigcodebench==0.2.5

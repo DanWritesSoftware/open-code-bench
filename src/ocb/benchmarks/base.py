@@ -46,6 +46,10 @@ class Benchmark(ABC):
     version: str
     conversation_mode: Literal["single_shot", "multi_turn"] = "single_shot"
     system_prompt: str | None = None
+    sandbox_image: str = "ocb-exec:0.3.1"   # the hardened scoring image this benchmark needs (D11)
+    run_prefix: str = "run"                  # run_id prefix for this benchmark's run dirs
+    sandbox_read_only: bool = True           # False = looser writable-rootfs sandbox (e.g. BigCodeBench)
+    sandbox_auto_confirm: bool = False       # True = feed 'y' to the evaluator's interactive [Y/N] prompts
 
     @abstractmethod
     def load_dataset(self, limit: int = 0) -> list[Task]: ...

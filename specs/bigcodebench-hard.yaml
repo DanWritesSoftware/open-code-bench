@@ -1,0 +1,17 @@
+# BigCodeBench run spec — HARD subset (148 tasks) for a cheaper first run (full = 1140).
+#   generate (Pi/Spark network):  python -m ocb.runner.run generate specs/bigcodebench-hard.yaml
+#   score    (Mint sandbox, x86):  python -m ocb.runner.run score runs/<run_id> --ssh-host sandbox
+# Scoring uses the official bigcodebench-evaluate image (~8.6GB, 139 task libs baked, offline).
+benchmark: bigcodebench
+options:
+  split: complete        # complete (docstring completion) | instruct (NL instruction)
+  subset: hard           # hard (148 tasks) | full (1140)
+models:
+  - qwen-spark-7b
+sampling:
+  temperature: 0.0
+  max_tokens: 1024       # BigCodeBench solutions run longer than HumanEval
+  num_ctx: 8192
+limit: 0
+concurrency: 32
+gateway: http://localhost:4000/v1

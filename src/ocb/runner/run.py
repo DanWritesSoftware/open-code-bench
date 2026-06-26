@@ -39,7 +39,8 @@ def _now() -> str:
 
 
 def generate(spec: dict, *, limit: int | None = None, concurrency: int | None = None) -> list[str]:
-    bench = get_benchmark(spec["benchmark"])
+    opts = dict(spec.get("options", {}))   # benchmark-specific (e.g. BigCodeBench split/subset)
+    bench = get_benchmark(spec["benchmark"], **opts)
     all_tasks = bench.load_dataset(0)
     lim = limit if limit is not None else int(spec.get("limit", 0))
     tasks = all_tasks[:lim] if lim else all_tasks
@@ -51,11 +52,12 @@ def generate(spec: dict, *, limit: int | None = None, concurrency: int | None = 
     ts = _now()
     run_ids = []
     for model in models:
-        run_id = f"heplus_{ts}" if len(models) == 1 else f"heplus_{ts}_{model}"
+        run_id = f"{bench.run_prefix}_{ts}" if len(models) == 1 else f"{bench.run_prefix}_{ts}_{model}"
         out = Path("runs") / run_id
         out.mkdir(parents=True, exist_ok=True)
         manifest = {
             "run_id": run_id, "benchmark": bench.name, "benchmark_version": bench.version,
+            "benchmark_options": opts,
             "dataset_size_total": len(all_tasks), "dataset_size_run": len(tasks),
             "dataset_hash": bench.dataset_hash(),
             "model_logical": model, "backend": bench.backend_info(model),
@@ -106,15 +108,17 @@ def _generate_model(bench, client, tasks, model, sampling, run_id, out: Path, co
 
 
 def score(run_dir, *, ssh_host=None, local=False, skip_eval=False, dry_run=False,
-          dataset="humaneval", base_only=False, image="ocb-exec:0.3.1",
+          dataset="humaneval", base_only=False, image=None,
           cpus="2", memory="4g", pids_limit=256, timeout=1800, parallel=None,
           ssh_workdir="/tmp") -> dict:
     run_dir = Path(run_dir)
     manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
-    bench = get_benchmark(manifest.get("benchmark", "humaneval_plus"))
+    bench = get_benchmark(manifest.get("benchmark", "humaneval_plus"), **manifest.get("benchmark_options", {}))
+    image = image or bench.sandbox_image     # each benchmark declares its hardened scoring image
     sandbox = None
     if not skip_eval:
         sandbox = SandboxRunner(image, cpus=cpus, memory=memory, pids_limit=pids_limit,
+                                read_only=bench.sandbox_read_only, auto_confirm=bench.sandbox_auto_confirm,
                                 ssh_host=ssh_host, ssh_workdir=ssh_workdir, local=local, dry_run=dry_run)
     metrics = bench.evaluate(run_dir, sandbox=sandbox, dataset=dataset, base_only=base_only,
                              timeout=timeout, parallel=parallel, skip_eval=skip_eval)
@@ -133,7 +137,7 @@ def main() -> None:
     s = sub.add_parser("score", help="score a generation run dir in the sandbox")
     s.add_argument("run_dir", type=Path)
     s.add_argument("--dataset", default="humaneval")
-    s.add_argument("--image", default="ocb-exec:0.3.1")
+    s.add_argument("--image", default=None, help="override the benchmark's default sandbox image")
     s.add_argument("--ssh-host")
     s.add_argument("--ssh-workdir", default="/tmp")
     s.add_argument("--local", action="store_true")

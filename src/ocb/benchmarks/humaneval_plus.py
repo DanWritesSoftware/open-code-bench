@@ -34,6 +34,7 @@ class HumanEvalPlus(Benchmark):
     version = "HumanEvalPlus-v0.1.10"          # the version evalplus 0.3.1 pins (D15)
     conversation_mode = "single_shot"
     system_prompt = SYSTEM_PROMPT
+    run_prefix = "heplus"
 
     def __init__(self):
         self._problems = None

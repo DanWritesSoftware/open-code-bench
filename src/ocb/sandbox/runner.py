@@ -17,33 +17,41 @@ from pathlib import Path
 
 class SandboxRunner:
     def __init__(self, image: str, *, cpus: str = "2", memory: str = "4g",
-                 pids_limit: int = 256, ssh_host: str | None = None,
+                 pids_limit: int = 256, read_only: bool = True, auto_confirm: bool = False,
+                 ssh_host: str | None = None,
                  ssh_workdir: str = "/tmp", local: bool = False, dry_run: bool = False):
         self.image = image
         self.cpus = str(cpus)
         self.memory = memory
         self.pids_limit = int(pids_limit)
+        self.read_only = read_only      # False = writable rootfs (looser profile for evaluators that write)
+        self.auto_confirm = auto_confirm  # feed 'y' to interactive prompts (ssh path)
         self.ssh_host = ssh_host
         self.ssh_workdir = ssh_workdir
         self.local = local
         self.dry_run = dry_run
 
-    def build_docker_argv(self, work_mount: str, inner_cmd: list[str]) -> list[str]:
-        """The hardened `docker run` (D11). `work_mount` is the host dir bind-mounted to /work."""
-        return [
-            "docker", "run", "--rm",
+    def build_docker_argv(self, work_mount: str, inner_cmd: list[str], env: dict | None = None) -> list[str]:
+        """The hardened `docker run` (D11). `work_mount` is the host dir bind-mounted to /work;
+        `env` entries become `-e VAR=val` flags (e.g. an offline dataset override)."""
+        argv = ["docker", "run", "--rm"]
+        if self.auto_confirm:
+            argv.append("-i")                 # keep stdin open so a piped 'y' answers prompts
+        argv += [
             "--network=none",                 # untrusted code gets no network
             "--cap-drop=ALL",                 # drop every Linux capability
             "--security-opt=no-new-privileges",
-            "--read-only",                    # immutable rootfs; dataset + ground-truth pre-baked
             "--tmpfs", "/tmp:rw,size=512m",   # writable scratch
             "--pids-limit", str(self.pids_limit),
             "--cpus", self.cpus,
             "--memory", self.memory,
-            "-v", f"{work_mount}:/work",
-            self.image,
-            *inner_cmd,
         ]
+        if self.read_only:
+            argv.append("--read-only")        # strict 'exec' profile; looser benchmarks turn it off
+        for k, v in (env or {}).items():
+            argv += ["-e", f"{k}={v}"]
+        argv += ["-v", f"{work_mount}:/work", self.image, *inner_cmd]
+        return argv
 
     def _run_steps(self, steps: list[list[str]]) -> None:
         for argv in steps:
@@ -51,16 +59,18 @@ class SandboxRunner:
             if not self.dry_run:
                 subprocess.run(argv, check=True)
 
-    def run_local(self, work_dir: Path, inner_cmd: list[str]) -> None:
-        argv = self.build_docker_argv(str(work_dir.resolve()), inner_cmd)
+    def run_local(self, work_dir: Path, inner_cmd: list[str], env: dict | None = None) -> None:
+        argv = self.build_docker_argv(str(work_dir.resolve()), inner_cmd, env)
         print("[sandbox] local Docker:")
         self._run_steps([argv])
 
     def run_ssh(self, work_dir: Path, inner_cmd: list[str], *,
-                in_files: list[str], out_files: list[str]) -> None:
+                in_files: list[str], out_files: list[str], env: dict | None = None) -> None:
         host = self.ssh_host
         remote = f"{self.ssh_workdir.rstrip('/')}/ocb-score-{work_dir.name}"
-        docker_cmd = " ".join(shlex.quote(a) for a in self.build_docker_argv(remote, inner_cmd))
+        docker_cmd = " ".join(shlex.quote(a) for a in self.build_docker_argv(remote, inner_cmd, env))
+        if self.auto_confirm:
+            docker_cmd = "yes | " + docker_cmd   # auto-answer the evaluator's interactive [Y/N] prompts
         print(f"[sandbox] over SSH: {host}  (remote work dir: {remote})")
         steps = [["ssh", host, f"mkdir -p {shlex.quote(remote)} && chmod 777 {shlex.quote(remote)}"]]
         steps += [["scp", str(work_dir / f), f"{host}:{remote}/{f}"] for f in in_files]
