@@ -1,0 +1,18 @@
+# BigCodeBench run spec — HARD subset (148 tasks), Qwen2.5-Coder-32B on the Spark.
+#   generate (Spark network):  python -m ocb.runner.run generate specs/bigcodebench-hard-32b.yaml
+#   score    (Mint sandbox):   python -m ocb.runner.run score runs/<run_id> --ssh-host sandbox
+# Mirrors specs/bigcodebench-hard.yaml (the 7B run, pass@1 0.224) with the 32B model for a
+# cross-model BigCodeBench comparison. Needs vLLM serving qwen-coder-32b on the Spark.
+benchmark: bigcodebench
+options:
+  split: complete        # complete (docstring completion) | instruct (NL instruction)
+  subset: hard           # hard (148 tasks) | full (1140)
+models:
+  - qwen-spark-32b
+sampling:
+  temperature: 0.0
+  max_tokens: 1024       # BigCodeBench solutions run longer than HumanEval
+  num_ctx: 8192
+limit: 0
+concurrency: 32
+gateway: http://localhost:4000/v1

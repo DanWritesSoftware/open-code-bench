@@ -1,0 +1,19 @@
+# BigCodeBench run spec — HARD subset (148 tasks), Qwen2.5-72B-Instruct (AWQ 4-bit) on the Spark.
+#   generate (Spark network):  python -m ocb.runner.run generate specs/bigcodebench-hard-72b.yaml
+#   score    (Mint sandbox):   python -m ocb.runner.run score runs/<run_id> --ssh-host sandbox
+# NOTE: qwen-spark-72b is a GENERAL Instruct model + 4-bit AWQ, NOT code-specialized — on HumanEval+
+# it scored 0.805, BELOW the 32B-Coder (0.866). Expect it may trail the 32B-Coder here too.
+# Needs vLLM serving qwen-72b (Qwen/Qwen2.5-72B-Instruct-AWQ) on the Spark.
+benchmark: bigcodebench
+options:
+  split: complete        # complete (docstring completion) | instruct (NL instruction)
+  subset: hard           # hard (148 tasks) | full (1140)
+models:
+  - qwen-spark-72b
+sampling:
+  temperature: 0.0
+  max_tokens: 1024       # BigCodeBench solutions run longer than HumanEval
+  num_ctx: 8192
+limit: 0
+concurrency: 32
+gateway: http://localhost:4000/v1
