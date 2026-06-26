@@ -12,12 +12,15 @@ A [LiteLLM](https://docs.litellm.ai/) proxy presents a single OpenAI-compatible 
 | qwen2.5-coder:1.5b (Q4_K_M) | Raspberry Pi 5 · Ollama | HumanEval+ | **0.610** | 0.665 | 164/164 |
 | qwen2.5-coder:7b | DGX Spark · vLLM (GB10) | HumanEval+ | **0.823** | 0.872 | 164/164 |
 | qwen2.5-coder:32b | DGX Spark · vLLM (GB10) | HumanEval+ | **0.866** | 0.909 | 164/164 |
+| qwen2.5-72b-instruct (AWQ 4-bit) | DGX Spark · vLLM (GB10) | HumanEval+ | **0.805** | 0.848 | 164/164 |
 
 <sub>pass@1 = HumanEval+ (base + extra tests); *base pass@1* = original HumanEval tests only. temp=0
 (greedy), single sample. Self-hosted backends — wall cost not metered. Dataset: HumanEvalPlus
 v0.1.10 (`fe585eb4…`), EvalPlus 0.3.1. Runs: `heplus_20260623T163736Z` (Pi 1.5B),
-`heplus_20260623T214900Z` (Spark 7B), `heplus_20260623T230559Z` (Spark 32B). Completeness =
-fairly-attempted / total (no infra/truncation).</sub>
+`heplus_20260623T214900Z` (Spark 7B), `heplus_20260623T230559Z` (Spark 32B),
+`heplus_20260624T222256Z` (Spark 72B-Instruct). The 72B is a *general* Instruct model (not Coder) +
+4-bit AWQ — which is why it lands below the 32B-Coder. Completeness = fairly-attempted / total
+(no infra/truncation).</sub>
 
 
 ## How it works

@@ -1,0 +1,13 @@
+# Single-model spec: Qwen2.5-Coder-7B on the Spark, used to re-validate the framework end-to-end
+# against the known result (HumanEval+ pass@1 = 0.823). Concurrency doesn't change results (temp=0),
+# only wall-clock. Generate on the Pi/Spark network, then score on the Mint network.
+benchmark: humaneval_plus
+models:
+  - qwen-spark-7b
+sampling:
+  temperature: 0.0
+  max_tokens: 768
+  num_ctx: 8192
+limit: 0
+concurrency: 32
+gateway: http://localhost:4000/v1
