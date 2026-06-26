@@ -59,14 +59,6 @@ $env:PYTHONUTF8='1'
 `score_humaneval.py` flags: `--local` (Docker on this host instead of SSH), `--dry-run` (print the
 exact hardened `docker run` without executing), `--skip-eval` (re-merge existing results).
 
-## Status
-
-**Phase 0 complete** — the full vertical slice works end-to-end: gateway → generate → sandbox
-score → attributed results, demonstrated with HumanEval+ on the Pi backend (above).
-
-Next: README leaderboard automation, stronger/faster backends (Spark vLLM `qwen-spark-32b`),
-a Postgres results store, and more benchmarks (BigCodeBench, LiveCodeBench, Aider polyglot).
-
 ## Layout
 
 ```
