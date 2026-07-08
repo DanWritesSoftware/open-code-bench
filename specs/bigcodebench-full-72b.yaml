@@ -1,0 +1,18 @@
+# BigCodeBench run spec — FULL subset (1140 tasks), complete split, Qwen2.5-72B-Instruct (AWQ 4-bit) on the Spark.
+#   generate (Spark network):  python -m ocb.runner.run generate specs/bigcodebench-full-72b.yaml
+#   score    (Mint sandbox):   python -m ocb.runner.run score runs/<run_id> --ssh-host sandbox
+# Canonical BigCodeBench numbers (the headline complete/full metric). Mirrors the 7B full spec with
+# the 72B model. Needs vLLM serving qwen-72b on the Spark.
+benchmark: bigcodebench
+options:
+  split: complete        # complete (docstring completion) | instruct (NL instruction)
+  subset: full           # full (1140 tasks) | hard (148)
+models:
+  - qwen-spark-72b
+sampling:
+  temperature: 0.0
+  max_tokens: 1024       # BigCodeBench solutions run longer than HumanEval
+  num_ctx: 8192
+limit: 0
+concurrency: 32
+gateway: http://localhost:4000/v1

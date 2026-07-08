@@ -37,13 +37,30 @@ Dataset: HumanEvalPlus v0.1.10 (`fe585eb4…`), EvalPlus 0.3.1. Runs `heplus_202
 signature + docstring. Dataset: BigCodeBench v0.1.4 hard subset (`f8d6f960…`), bigcodebench 0.2.5.
 Runs `bcb_20260626T170715Z` (7B), `bcb_20260626T211347Z` (32B), `bcb_20260626T215636Z` (72B).</sub>
 
+### BigCodeBench-full — 1140 tasks (complete split)
+
+The canonical BigCodeBench (the headline metric the official leaderboard cites).
+
+| Model | Backend | pass@1 | Completeness |
+|---|---|---|---|
+| qwen2.5-coder:7b | DGX Spark · vLLM (GB10) | 0.494 | 1137/1140 |
+| **qwen2.5-coder:32b** | DGX Spark · vLLM (GB10) | **0.595** | 1139/1140 |
+| qwen2.5-72b-instruct (AWQ 4-bit) | DGX Spark · vLLM (GB10) | 0.549 | 1140/1140 |
+
+<sub>pass@1 over fairly-attempted (truncated samples excluded per D12). *complete* split, *full* subset
+(all 1140 tasks). Dataset: BigCodeBench v0.1.4 (`acf4f1de…`), bigcodebench 0.2.5.
+Runs `bcb_20260708T172117Z` (7B), `bcb_20260708T174739Z` (32B), `bcb_20260708T191232Z` (72B).</sub>
+
 ### Key findings
 
 - **BigCodeBench-hard discriminates far better than HumanEval+.** The 7B→32B jump is **+72%** on
   BCB-hard (0.224→0.385) versus just **+5%** on HumanEval+ (0.823→0.866). HumanEval+ is near-saturated
   for capable coders — BCB-hard has real headroom and is the more useful ranking benchmark here.
-- **Same ranking on both benchmarks: 32B-Coder > 72B-Instruct-AWQ > 7B-Coder.** The 72B is a *general*
-  Instruct model at 4-bit AWQ (not code-specialized) and lands below the 32B-**Coder** on both —
+- **Full vs hard is a difficulty dial.** The same 7B→32B jump is **+20%** on BCB-full (0.494→0.595) —
+  between HumanEval+'s +5% and BCB-hard's +72%. BCB-full mixes easy and hard tasks, so it compresses
+  the model range that the *hard* subset stretches out; the hard subset stays the sharpest discriminator.
+- **Same ranking on all three benchmarks: 32B-Coder > 72B-Instruct-AWQ > 7B-Coder.** The 72B is a *general*
+  Instruct model at 4-bit AWQ (not code-specialized) and lands below the 32B-**Coder** everywhere —
   code-specialization + full precision beats raw size + quantization for coding.
 - **Edge device:** the 1.5B on a Raspberry Pi 5 reaches 0.610 on HumanEval+ — respectable for a CPU
   edge box. 
