@@ -17,6 +17,12 @@ import tempfile
 import uuid
 from pathlib import Path
 
+# Bound on the SSH setup steps (mkdir/chmod, scp the tarball, extract) in run_dir_capture — these
+# move only a small exercise tree, so this is generous headroom, not a real budget; its purpose is
+# to turn a stalled/black-holed connection into a raised, catchable error instead of an indefinite
+# hang of the calling (thread-pooled) worker.
+_SETUP_TIMEOUT = 120
+
 
 class SandboxRunner:
     def __init__(self, image: str, *, cpus: str = "2", memory: str = "4g",
@@ -132,12 +138,16 @@ class SandboxRunner:
             with tarfile.open(tgz, "w:gz") as tar:
                 tar.add(work_dir, arcname=".")   # contents at the archive root
             try:
-                # infra steps: fail loudly (check=True) so the caller marks the attempt infra_error
+                # infra steps: fail loudly (check=True) so the caller marks the attempt infra_error.
+                # Bounded (_SETUP_TIMEOUT) so a stalled/black-holed connection raises a catchable
+                # TimeoutExpired instead of hanging this (thread-pooled) worker forever — these move
+                # only a small exercise tree, so the bound is generous headroom, not a real budget.
                 subprocess.run(["ssh", host, f"rm -rf {rq} && mkdir -p {rq} && chmod 777 {rq}"],
-                               check=True)
-                subprocess.run(["scp", str(tgz), f"{host}:{remote}/_ocb.tgz"], check=True)
+                               check=True, timeout=_SETUP_TIMEOUT)
+                subprocess.run(["scp", str(tgz), f"{host}:{remote}/_ocb.tgz"],
+                               check=True, timeout=_SETUP_TIMEOUT)
                 subprocess.run(["ssh", host, f"tar xzf {rq}/_ocb.tgz -C {rq} && rm -f {rq}/_ocb.tgz"],
-                               check=True)
+                               check=True, timeout=_SETUP_TIMEOUT)
                 # test step: capture exit + output WITHOUT check — nonzero here is a failing test
                 p = subprocess.run(["ssh", host, docker_cmd], capture_output=True, text=True,
                                    timeout=timeout)
@@ -157,7 +167,10 @@ class SandboxRunner:
                 except Exception:
                     pass
                 raise
-            subprocess.run(["ssh", host, f"rm -rf {rq}"], check=False)   # best-effort cleanup
+            try:
+                subprocess.run(["ssh", host, f"rm -rf {rq}"], check=False, timeout=30)
+            except Exception:
+                pass   # best-effort cleanup; never let it hang or mask the real test result
             return (p.returncode, (p.stdout or "") + (p.stderr or ""))
         finally:
             tgz.unlink(missing_ok=True)
