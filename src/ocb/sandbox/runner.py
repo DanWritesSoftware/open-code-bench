@@ -34,10 +34,15 @@ class SandboxRunner:
         self.local = local
         self.dry_run = dry_run
 
-    def build_docker_argv(self, work_mount: str, inner_cmd: list[str], env: dict | None = None) -> list[str]:
+    def build_docker_argv(self, work_mount: str, inner_cmd: list[str], env: dict | None = None,
+                          name: str | None = None) -> list[str]:
         """The hardened `docker run` (D11). `work_mount` is the host dir bind-mounted to /work;
-        `env` entries become `-e VAR=val` flags (e.g. an offline dataset override)."""
+        `env` entries become `-e VAR=val` flags (e.g. an offline dataset override). `name` gives the
+        container a fixed, addressable name so a caller can force-remove it later (e.g. after a
+        local timeout leaves it running remotely, since --rm only cleans up on a normal exit)."""
         argv = ["docker", "run", "--rm"]
+        if name:
+            argv += ["--name", name]
         if self.auto_confirm:
             argv.append("-i")                 # keep stdin open so a piped 'y' answers prompts
         argv += [
@@ -111,26 +116,47 @@ class SandboxRunner:
         # different languages collide on one remote dir and race each other's rm -rf/extract. A
         # per-call random suffix guarantees a distinct remote path regardless of what naming
         # convention the caller's work_dir happens to use.
-        remote = f"{self.ssh_workdir.rstrip('/')}/ocb-exec-{work_dir.name}-{uuid.uuid4().hex[:12]}"
-        docker_cmd = " ".join(shlex.quote(a) for a in self.build_docker_argv(remote, inner_cmd, env))
+        suffix = uuid.uuid4().hex[:12]
+        remote = f"{self.ssh_workdir.rstrip('/')}/ocb-exec-{work_dir.name}-{suffix}"
+        container_name = f"ocb-exec-{suffix}"     # addressable so a timeout can force-remove it
+        docker_cmd = " ".join(shlex.quote(a) for a in
+                              self.build_docker_argv(remote, inner_cmd, env, name=container_name))
         print(f"[sandbox] over SSH (capture): {host}  (remote: {remote})")
         if self.dry_run:
             print("  $ tar+scp <work_dir> && ssh extract && " + docker_cmd)
             return (0, "[dry-run] not executed")
         with tempfile.NamedTemporaryFile(suffix=".tgz", delete=False) as tf:
             tgz = Path(tf.name)
+        rq = shlex.quote(remote)
         try:
             with tarfile.open(tgz, "w:gz") as tar:
                 tar.add(work_dir, arcname=".")   # contents at the archive root
-            rq = shlex.quote(remote)
-            # infra steps: fail loudly (check=True) so the caller marks the attempt infra_error
-            subprocess.run(["ssh", host, f"rm -rf {rq} && mkdir -p {rq} && chmod 777 {rq}"], check=True)
-            subprocess.run(["scp", str(tgz), f"{host}:{remote}/_ocb.tgz"], check=True)
-            subprocess.run(["ssh", host, f"tar xzf {rq}/_ocb.tgz -C {rq} && rm -f {rq}/_ocb.tgz"],
-                           check=True)
-            # test step: capture exit + output WITHOUT check — a nonzero exit here is a failing test
-            p = subprocess.run(["ssh", host, docker_cmd], capture_output=True, text=True,
-                               timeout=timeout)
+            try:
+                # infra steps: fail loudly (check=True) so the caller marks the attempt infra_error
+                subprocess.run(["ssh", host, f"rm -rf {rq} && mkdir -p {rq} && chmod 777 {rq}"],
+                               check=True)
+                subprocess.run(["scp", str(tgz), f"{host}:{remote}/_ocb.tgz"], check=True)
+                subprocess.run(["ssh", host, f"tar xzf {rq}/_ocb.tgz -C {rq} && rm -f {rq}/_ocb.tgz"],
+                               check=True)
+                # test step: capture exit + output WITHOUT check — nonzero here is a failing test
+                p = subprocess.run(["ssh", host, docker_cmd], capture_output=True, text=True,
+                                   timeout=timeout)
+            except Exception:
+                # A timeout kills our LOCAL ssh client but does not guarantee the remote docker
+                # container dies with it (the remote shell only notices the dropped connection once
+                # it tries to write to the closed pipe, which may be never for a silently-hanging
+                # test) — so force-remove it by the --name we gave it over a FRESH ssh connection,
+                # then wipe the scratch dir, before propagating the error (the caller records this
+                # as an infra failure, not a test failure, per D12). Bounded so a dead network can't
+                # turn this best-effort cleanup into its own indefinite hang; failures here are
+                # swallowed so the ORIGINAL exception (not a cleanup failure) is what propagates.
+                try:
+                    subprocess.run(
+                        ["ssh", host, f"docker rm -f {container_name} >/dev/null 2>&1; rm -rf {rq}"],
+                        check=False, timeout=30)
+                except Exception:
+                    pass
+                raise
             subprocess.run(["ssh", host, f"rm -rf {rq}"], check=False)   # best-effort cleanup
             return (p.returncode, (p.stdout or "") + (p.stderr or ""))
         finally:
