@@ -11,6 +11,9 @@ __pycache__/
 # Run artifacts (Postgres is the system of record; these are exports)
 runs/
 
+# Benchmark datasets cloned locally (e.g. the Aider polyglot repo) — not vendored
+datasets/
+
 # Internal docs (design + working notes)
 docs/
 

@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import shlex
 import subprocess
+import tarfile
+import tempfile
 from pathlib import Path
 
 
@@ -79,3 +81,49 @@ class SandboxRunner:
         steps += [["scp", f"{host}:{remote}/{f}", str(work_dir / f)] for f in out_files]
         steps.append(["ssh", host, f"rm -rf {shlex.quote(remote)}"])
         self._run_steps(steps)
+
+    # ---- directory-tree exec with captured output (agentic/multi-turn benchmarks, D14) ----
+    # Single-shot scoring ships flat sample files and reads result JSON back (run_local/run_ssh).
+    # AiderPolyglot instead needs, per model turn: ship a whole *exercise directory* (edited
+    # solution files + hidden tests + build config), run the language's test command inside it,
+    # and read back only the exit code (pass/fail) and combined output (to feed as the next-turn
+    # prompt). No files come back. This method provides exactly that; infra failures (ssh/scp/tar)
+    # raise, while a nonzero *test* exit is returned as data so the caller can distinguish a failed
+    # test from an infra error (D12).
+    def run_dir_capture(self, work_dir: Path, inner_cmd: list[str], *,
+                        env: dict | None = None, timeout: int | None = None) -> tuple[int, str]:
+        if self.local:
+            argv = self.build_docker_argv(str(work_dir.resolve()), inner_cmd, env)
+            print("[sandbox] local Docker (capture): $ " + " ".join(shlex.quote(a) for a in argv))
+            if self.dry_run:
+                return (0, "[dry-run] not executed")
+            p = subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
+            return (p.returncode, (p.stdout or "") + (p.stderr or ""))
+
+        # SSH: tar the tree locally (stdlib tarfile — no external `tar` needed on Windows), scp it,
+        # extract remotely, run docker (capturing that step's exit as the *test* result), clean up.
+        host = self.ssh_host
+        remote = f"{self.ssh_workdir.rstrip('/')}/ocb-exec-{work_dir.name}"
+        docker_cmd = " ".join(shlex.quote(a) for a in self.build_docker_argv(remote, inner_cmd, env))
+        print(f"[sandbox] over SSH (capture): {host}  (remote: {remote})")
+        if self.dry_run:
+            print("  $ tar+scp <work_dir> && ssh extract && " + docker_cmd)
+            return (0, "[dry-run] not executed")
+        with tempfile.NamedTemporaryFile(suffix=".tgz", delete=False) as tf:
+            tgz = Path(tf.name)
+        try:
+            with tarfile.open(tgz, "w:gz") as tar:
+                tar.add(work_dir, arcname=".")   # contents at the archive root
+            rq = shlex.quote(remote)
+            # infra steps: fail loudly (check=True) so the caller marks the attempt infra_error
+            subprocess.run(["ssh", host, f"rm -rf {rq} && mkdir -p {rq} && chmod 777 {rq}"], check=True)
+            subprocess.run(["scp", str(tgz), f"{host}:{remote}/_ocb.tgz"], check=True)
+            subprocess.run(["ssh", host, f"tar xzf {rq}/_ocb.tgz -C {rq} && rm -f {rq}/_ocb.tgz"],
+                           check=True)
+            # test step: capture exit + output WITHOUT check — a nonzero exit here is a failing test
+            p = subprocess.run(["ssh", host, docker_cmd], capture_output=True, text=True,
+                               timeout=timeout)
+            subprocess.run(["ssh", host, f"rm -rf {rq}"], check=False)   # best-effort cleanup
+            return (p.returncode, (p.stdout or "") + (p.stderr or ""))
+        finally:
+            tgz.unlink(missing_ok=True)

@@ -1,0 +1,9 @@
+// Throwaway project built once at image-build time (network on) to warm ~/.gradle with the JUnit5
+// stack Exercism Java exercises use, so runtime `./gradlew test --offline` resolves from cache.
+plugins { id 'java' }
+repositories { mavenCentral() }
+dependencies {
+    testImplementation platform('org.junit:junit-bom:5.10.2')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testImplementation 'org.assertj:assertj-core:3.25.3'
+}

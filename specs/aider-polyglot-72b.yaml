@@ -1,0 +1,37 @@
+# Aider polyglot run spec — multi-turn (2 tries) whole-file editing, all 6 languages,
+# Qwen2.5-72B-Instruct (AWQ 4-bit) — a general instruct model, not code-specialized.
+#
+# UNLIKE the other benchmarks, polyglot is AGENTIC: it runs the language's test suite BETWEEN model
+# turns to build the feedback for the next try, so the *generate* step needs a sandbox too. Run it
+# where the workstation can reach BOTH the gateway (localhost:4000 -> Spark vLLM) AND the sandbox
+# host (Mint over SSH):
+#   generate:  python -m ocb.runner.run generate specs/aider-polyglot-72b.yaml --ssh-host sandbox
+#   score:     python -m ocb.runner.run score runs/<run_id> --skip-eval
+#              (tests already ran during generate; scoring is pure aggregation, no sandbox needed)
+#
+# Prereqs: (1) clone the dataset once — git clone https://github.com/Aider-AI/polyglot-benchmark
+#          datasets/polyglot-benchmark  (or set POLYGLOT_BENCH_PATH); (2) build the fat offline
+#          exec image on the sandbox host — docker build -t ocb-polyglot-exec:0.1.0 docker/exec-polyglot;
+#          (3) vLLM serving qwen-coder-72b on the Spark.
+benchmark: aider_polyglot
+options:
+  repo_path: datasets/polyglot-benchmark   # or leave unset and export POLYGLOT_BENCH_PATH
+  tries: 2                 # attempts per exercise; pass_rate_1 and pass_rate_2 are reported
+  per_test_timeout: 300    # seconds per test run inside the sandbox
+  # languages: [python, go, rust, java, javascript, cpp]   # subset override (default: all six)
+models:
+  - qwen-spark-72b
+sampling:
+  temperature: 0.0         # greedy for a deterministic pass rate
+  max_tokens: 3072         # whole-file edits; NOTE the multi-turn prompt (instructions + attempt-1
+  #                          file + test output) accumulates — keep vLLM --max-model-len >= 8192 and
+  #                          watch for truncation on the most verbose exercises.
+  num_ctx: 8192            # Ollama-only; ignored by vLLM
+limit: 0                   # 0 = all exercises
+concurrency: 8             # each in-flight exercise runs a container on the sandbox host; keep modest
+gateway: http://localhost:4000/v1
+sandbox:                   # used DURING generate for the test-feedback loop (multi_turn benchmark)
+  ssh_host: sandbox        # CLI --ssh-host overrides this
+  memory: 8g
+  pids_limit: 2048
+  ssh_workdir: /tmp

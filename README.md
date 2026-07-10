@@ -112,6 +112,30 @@ host instead of SSH), `--dry-run` (print the exact hardened `docker run` without
 `--skip-eval` (re-merge existing eval results). The `scripts/gen_humaneval.py` and
 `scripts/score_humaneval.py` entry points still work — they're thin wrappers over the runner.
 
+### Agentic benchmarks (Aider polyglot)
+
+Most benchmarks are single-shot and keep generate and score cleanly separate. **Aider polyglot** is
+different: it's *multi-turn* — the model edits an exercise's file(s), the (hidden) test suite runs,
+and if it fails the test output is fed back for a second try (`tries`, default 2). Because tests run
+*between* model turns, execution is interleaved with generation, so the **generate** step needs a
+sandbox too. Metrics are `pass_rate_1` (solved first try) and `pass_rate_2` (within `tries`),
+overall and per language (C++, Go, Java, JavaScript, Python, Rust).
+
+```powershell
+# once: clone the dataset (not vendored) and build the fat 6-language offline image on the sandbox host
+git clone https://github.com/Aider-AI/polyglot-benchmark datasets/polyglot-benchmark
+#   docker build -t ocb-polyglot-exec:0.1.0 docker/exec-polyglot   (on the sandbox host)
+
+# generate runs the edit→test→feedback loop, so it takes --ssh-host (the sandbox for test feedback)
+.\.venv\Scripts\python.exe -m ocb.runner.run generate specs\aider-polyglot-7b.yaml --ssh-host sandbox
+
+# tests already ran during generate, so scoring is pure aggregation — no sandbox needed
+.\.venv\Scripts\python.exe -m ocb.runner.run score runs\polyglot_<timestamp> --skip-eval
+```
+
+Edit format is whole-file (aider's "whole" format), so numbers compare to the leaderboard's
+whole-format entries, not its default diff format.
+
 ## Layout
 
 ```
@@ -149,6 +173,7 @@ crashes under the cp1252 console codepage otherwise). On the sandbox host, build
 benchmarks you'll score, once:
 
 ```bash
-docker build -t ocb-exec:0.3.1 docker/exec            # HumanEval+
-docker build -t ocb-bcb-exec:0.2.4 docker/exec-bcb    # BigCodeBench
+docker build -t ocb-exec:0.3.1 docker/exec                  # HumanEval+
+docker build -t ocb-bcb-exec:0.2.4 docker/exec-bcb          # BigCodeBench
+docker build -t ocb-polyglot-exec:0.1.0 docker/exec-polyglot # Aider polyglot (6 toolchains, offline)
 ```

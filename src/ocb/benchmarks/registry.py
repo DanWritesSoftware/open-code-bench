@@ -4,6 +4,7 @@ Add a benchmark = implement the Benchmark interface and register it here.
 """
 from __future__ import annotations
 
+from ocb.benchmarks.aider_polyglot import AiderPolyglot
 from ocb.benchmarks.base import Benchmark
 from ocb.benchmarks.bigcodebench import BigCodeBench
 from ocb.benchmarks.humaneval_plus import HumanEvalPlus
@@ -11,6 +12,7 @@ from ocb.benchmarks.humaneval_plus import HumanEvalPlus
 _REGISTRY: dict[str, type[Benchmark]] = {
     HumanEvalPlus.name: HumanEvalPlus,
     BigCodeBench.name: BigCodeBench,
+    AiderPolyglot.name: AiderPolyglot,
 }
 
 

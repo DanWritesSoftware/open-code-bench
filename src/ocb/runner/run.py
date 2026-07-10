@@ -38,7 +38,27 @@ def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
 
-def generate(spec: dict, *, limit: int | None = None, concurrency: int | None = None) -> list[str]:
+def _build_gen_sandbox(bench, spec: dict, *, ssh_host=None, local=False, dry_run=False):
+    """Multi-turn/agentic benchmarks (AiderPolyglot) execute tests *between* model turns, so the
+    generate step needs a sandbox too (single-shot benchmarks return None and score separately).
+    Sandbox resources come from the spec's optional `sandbox:` block, CLI overriding host/local."""
+    if bench.conversation_mode != "multi_turn":
+        return None
+    sb = dict(spec.get("sandbox", {}))
+    host = ssh_host or sb.get("ssh_host")
+    is_local = local or bool(sb.get("local"))
+    if not host and not is_local and not dry_run:
+        raise SystemExit(f"benchmark {bench.name!r} is multi_turn and needs a sandbox for test "
+                         "feedback: pass --ssh-host <host> or --local (or --dry-run)")
+    return SandboxRunner(
+        bench.sandbox_image, cpus=str(sb.get("cpus", "2")), memory=str(sb.get("memory", "4g")),
+        pids_limit=int(sb.get("pids_limit", 1024)), read_only=bench.sandbox_read_only,
+        auto_confirm=bench.sandbox_auto_confirm, ssh_host=host,
+        ssh_workdir=sb.get("ssh_workdir", "/tmp"), local=is_local, dry_run=dry_run)
+
+
+def generate(spec: dict, *, limit: int | None = None, concurrency: int | None = None,
+             ssh_host=None, local=False, dry_run=False) -> list[str]:
     opts = dict(spec.get("options", {}))   # benchmark-specific (e.g. BigCodeBench split/subset)
     bench = get_benchmark(spec["benchmark"], **opts)
     all_tasks = bench.load_dataset(0)
@@ -48,6 +68,7 @@ def generate(spec: dict, *, limit: int | None = None, concurrency: int | None = 
     conc = concurrency if concurrency is not None else int(spec.get("concurrency", 1))
     gateway = spec.get("gateway", GATEWAY)
     client = GatewayClient(gateway)
+    sandbox = _build_gen_sandbox(bench, spec, ssh_host=ssh_host, local=local, dry_run=dry_run)
     models = list(spec["models"])
     ts = _now()
     run_ids = []
@@ -67,25 +88,28 @@ def generate(spec: dict, *, limit: int | None = None, concurrency: int | None = 
         }
         (out / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
         print(f"run_id={run_id}  model={model}  ->  {out}  ({len(tasks)} tasks, concurrency={conc})")
-        _generate_model(bench, client, tasks, model, sampling, run_id, out, conc)
+        _generate_model(bench, client, tasks, model, sampling, run_id, out, conc, sandbox=sandbox)
         run_ids.append(run_id)
     return run_ids
 
 
-def _generate_model(bench, client, tasks, model, sampling, run_id, out: Path, conc: int) -> None:
+def _generate_model(bench, client, tasks, model, sampling, run_id, out: Path, conc: int,
+                    sandbox=None) -> None:
     records_f = (out / "records.jsonl").open("w", encoding="utf-8")
     samples_f = (out / "samples.jsonl").open("w", encoding="utf-8")
     lock = threading.Lock()
     counts: dict[str, int] = {"ok": 0, "truncated": 0, "infra_error": 0}
 
     def one(task):
-        sol = bench.run(task, client, model=model, sampling=sampling, run_id=run_id)
+        sol = bench.run(task, client, model=model, sampling=sampling, run_id=run_id, sandbox=sandbox)
         rec = {"run_id": run_id, "task_id": sol.task_id, "sample_index": sol.sample_index,
                "gen_status": sol.gen_status, "finish_reason": sol.finish_reason,
                "prompt_tokens": sol.prompt_tokens, "completion_tokens": sol.completion_tokens,
                "latency_s": sol.latency_s, "raw_completion": sol.text}
         if sol.error is not None:
             rec["error"] = sol.error
+        if sol.extra:                          # multi-turn/agentic per-attempt detail (D14)
+            rec.update(sol.extra)
         with lock:
             counts[sol.gen_status] = counts.get(sol.gen_status, 0) + 1
             records_f.write(json.dumps(rec) + "\n"); records_f.flush()
@@ -133,6 +157,11 @@ def main() -> None:
     g.add_argument("spec", type=Path)
     g.add_argument("--limit", type=int, default=None, help="override spec limit (0 = all)")
     g.add_argument("--concurrency", type=int, default=None, help="override spec concurrency")
+    # multi-turn/agentic benchmarks (AiderPolyglot) run tests between turns -> need a sandbox now
+    g.add_argument("--ssh-host", help="sandbox host for multi_turn benchmarks' test feedback")
+    g.add_argument("--local", action="store_true", help="use local Docker for the multi_turn sandbox")
+    g.add_argument("--dry-run", action="store_true",
+                   help="multi_turn: print sandbox commands without executing")
 
     s = sub.add_parser("score", help="score a generation run dir in the sandbox")
     s.add_argument("run_dir", type=Path)
@@ -155,7 +184,8 @@ def main() -> None:
     if args.op == "generate":
         import yaml
         spec = yaml.safe_load(args.spec.read_text(encoding="utf-8"))
-        generate(spec, limit=args.limit, concurrency=args.concurrency)
+        generate(spec, limit=args.limit, concurrency=args.concurrency,
+                 ssh_host=args.ssh_host, local=args.local, dry_run=args.dry_run)
     else:  # score
         if not args.local and not args.ssh_host and not args.skip_eval:
             ap.error("score: pass --ssh-host <host> or --local (or --skip-eval to re-merge only)")
