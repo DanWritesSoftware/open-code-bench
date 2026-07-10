@@ -14,6 +14,7 @@ import shlex
 import subprocess
 import tarfile
 import tempfile
+import uuid
 from pathlib import Path
 
 
@@ -103,7 +104,14 @@ class SandboxRunner:
         # SSH: tar the tree locally (stdlib tarfile — no external `tar` needed on Windows), scp it,
         # extract remotely, run docker (capturing that step's exit as the *test* result), clean up.
         host = self.ssh_host
-        remote = f"{self.ssh_workdir.rstrip('/')}/ocb-exec-{work_dir.name}"
+        # `work_dir.name` alone is NOT unique across concurrent calls: AiderPolyglot ships one
+        # working dir per (task, attempt), and its leaf name is the bare exercise name (e.g.
+        # "two-fer"), which the polyglot dataset reuses across all 6 language tracks. Keying the
+        # remote scratch path on that name alone let two concurrent same-named exercises in
+        # different languages collide on one remote dir and race each other's rm -rf/extract. A
+        # per-call random suffix guarantees a distinct remote path regardless of what naming
+        # convention the caller's work_dir happens to use.
+        remote = f"{self.ssh_workdir.rstrip('/')}/ocb-exec-{work_dir.name}-{uuid.uuid4().hex[:12]}"
         docker_cmd = " ".join(shlex.quote(a) for a in self.build_docker_argv(remote, inner_cmd, env))
         print(f"[sandbox] over SSH (capture): {host}  (remote: {remote})")
         if self.dry_run:
