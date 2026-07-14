@@ -1,0 +1,5 @@
+# Files consumed inside Linux sandbox containers must keep LF endings regardless of the host that
+# committed them (a CRLF shebang breaks `bash` in the exec images).
+*.sh            text eol=lf
+Dockerfile      text eol=lf
+*.gradle        text eol=lf

@@ -11,6 +11,8 @@ __pycache__/
 # Run artifacts (Postgres is the system of record; these are exports)
 runs/
 
+# Benchmark datasets cloned locally (e.g. the Aider polyglot repo) — not vendored
+datasets/
 # LiveCodeBench dataset files baked into the exec-lcb build context (~4.4GB) — populated locally
 # per docker/exec-lcb/Dockerfile's header comment, not committed.
 docker/exec-lcb/lcb-data/

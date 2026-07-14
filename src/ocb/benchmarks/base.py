@@ -34,6 +34,10 @@ class Solution:
     completion_tokens: int | None = None
     latency_s: float | None = None
     error: str | None = None
+    extra: dict | None = None        # benchmark-specific extra record fields (e.g. AiderPolyglot's
+    #                                  per-attempt test results); the runner merges these into the
+    #                                  record dict so multi-turn/agentic benchmarks can carry state
+    #                                  a single `text` can't (D14).
 
 
 @dataclass
@@ -63,8 +67,12 @@ class Benchmark(ABC):
         return completion
 
     def run(self, task: Task, client: GatewayClient, *, model: str, sampling: dict,
-            run_id: str, sample_index: int = 0) -> Solution:
-        """Default single-shot driver (D14). Multi-turn benchmarks override this."""
+            run_id: str, sample_index: int = 0, sandbox=None) -> Solution:
+        """Default single-shot driver (D14). Multi-turn/agentic benchmarks override this.
+
+        `sandbox` is a SandboxRunner the runner supplies only for `multi_turn` benchmarks (which
+        must execute tests *between* model turns to build feedback); single-shot benchmarks ignore
+        it and score in a separate `score` step (D11)."""
         t0 = time.time()
         try:
             comp = client.complete(
