@@ -8,11 +8,13 @@ from ocb.benchmarks.aider_polyglot import AiderPolyglot
 from ocb.benchmarks.base import Benchmark
 from ocb.benchmarks.bigcodebench import BigCodeBench
 from ocb.benchmarks.humaneval_plus import HumanEvalPlus
+from ocb.benchmarks.livecodebench import LiveCodeBench
 
 _REGISTRY: dict[str, type[Benchmark]] = {
     HumanEvalPlus.name: HumanEvalPlus,
     BigCodeBench.name: BigCodeBench,
     AiderPolyglot.name: AiderPolyglot,
+    LiveCodeBench.name: LiveCodeBench,
 }
 
 

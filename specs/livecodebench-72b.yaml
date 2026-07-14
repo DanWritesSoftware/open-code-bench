@@ -1,0 +1,16 @@
+# LiveCodeBench run spec — code-generation scenario, release_v5, Qwen2.5-72B-Instruct (AWQ 4-bit) on the Spark.
+#   generate (Spark network):  python -m ocb.runner.run generate specs/livecodebench-72b.yaml
+#   score    (Mint sandbox):   python -m ocb.runner.run score runs/<run_id> --ssh-host sandbox --memory 8g --pids-limit 1024
+# Mirrors the 7B spec with the 72B AWQ model. Needs vLLM serving qwen-72b on the Spark.
+benchmark: livecodebench
+options:
+  release_version: release_v5
+models:
+  - qwen-spark-72b
+sampling:
+  temperature: 0.0
+  max_tokens: 2048
+  num_ctx: 8192
+limit: 0
+concurrency: 32
+gateway: http://localhost:4000/v1

@@ -1,0 +1,19 @@
+# LiveCodeBench run spec — code-generation scenario, release_v5, Qwen2.5-Coder-7B on the Spark.
+#   generate (Spark network):  python -m ocb.runner.run generate specs/livecodebench-7b.yaml
+#   score    (Mint sandbox):   python -m ocb.runner.run score runs/<run_id> --ssh-host sandbox --memory 8g --pids-limit 1024
+# The scoring image (ocb-lcb-exec) executes untrusted stdin/stdout solutions against many hidden
+# tests, so give the sandbox more headroom than HumanEval+ (--memory 8g, --pids-limit 1024).
+# Needs vLLM serving qwen-coder-7b on the Spark.
+benchmark: livecodebench
+options:
+  release_version: release_v5    # pinned cumulative release (D15); release_v1..v6 | release_latest
+  # start_date / end_date: optional YYYY-MM-DD contest-date window (applied on gen AND score sides)
+models:
+  - qwen-spark-7b
+sampling:
+  temperature: 0.0        # greedy for pass@1
+  max_tokens: 2048        # competitive-programming solutions; stay within the vLLM --max-model-len 8192
+  num_ctx: 8192           # Ollama-only; ignored by vLLM
+limit: 0                  # MUST be 0 — the evaluator asserts len(outputs) == len(benchmark)
+concurrency: 32
+gateway: http://localhost:4000/v1

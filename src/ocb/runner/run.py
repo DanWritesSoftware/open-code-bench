@@ -59,6 +59,17 @@ def _build_gen_sandbox(bench, spec: dict, *, ssh_host=None, local=False, dry_run
 
 def generate(spec: dict, *, limit: int | None = None, concurrency: int | None = None,
              ssh_host=None, local=False, dry_run=False) -> list[str]:
+def _recorded_task_ids(out: Path) -> set[str]:
+    """task_ids already present in records.jsonl (any status) — used to skip on resume so a
+    restarted generation is idempotent and never double-writes a task (D12)."""
+    f = out / "records.jsonl"
+    if not f.is_file():
+        return set()
+    return {json.loads(l)["task_id"] for l in f.read_text(encoding="utf-8").splitlines() if l.strip()}
+
+
+def generate(spec: dict, *, limit: int | None = None, concurrency: int | None = None,
+             resume: str | None = None) -> list[str]:
     opts = dict(spec.get("options", {}))   # benchmark-specific (e.g. BigCodeBench split/subset)
     bench = get_benchmark(spec["benchmark"], **opts)
     all_tasks = bench.load_dataset(0)
@@ -69,6 +80,22 @@ def generate(spec: dict, *, limit: int | None = None, concurrency: int | None = 
     gateway = spec.get("gateway", GATEWAY)
     client = GatewayClient(gateway)
     sandbox = _build_gen_sandbox(bench, spec, ssh_host=ssh_host, local=local, dry_run=dry_run)
+
+    if resume is not None:
+        # Resume ONE existing run dir: reuse its run_id/model, skip already-recorded tasks, append.
+        out = Path(resume)
+        manifest = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
+        run_id, model = manifest["run_id"], manifest["model_logical"]
+        done = _recorded_task_ids(out)
+        todo = [t for t in tasks if t.task_id not in done]
+        print(f"resume run_id={run_id}  model={model}  ({len(done)} already done, "
+              f"{len(todo)} to go, concurrency={conc})")
+        if todo:
+            _generate_model(bench, client, todo, model, sampling, run_id, out, conc, append=True)
+        else:
+            print(f"nothing to resume for {run_id}: all {len(tasks)} tasks recorded")
+        return [run_id]
+
     models = list(spec["models"])
     ts = _now()
     run_ids = []
@@ -97,6 +124,10 @@ def _generate_model(bench, client, tasks, model, sampling, run_id, out: Path, co
                     sandbox=None) -> None:
     records_f = (out / "records.jsonl").open("w", encoding="utf-8")
     samples_f = (out / "samples.jsonl").open("w", encoding="utf-8")
+                    append: bool = False) -> None:
+    mode = "a" if append else "w"   # append preserves prior records/samples when resuming
+    records_f = (out / "records.jsonl").open(mode, encoding="utf-8")
+    samples_f = (out / "samples.jsonl").open(mode, encoding="utf-8")
     lock = threading.Lock()
     counts: dict[str, int] = {"ok": 0, "truncated": 0, "infra_error": 0}
 
@@ -134,10 +165,16 @@ def _generate_model(bench, client, tasks, model, sampling, run_id, out: Path, co
 def score(run_dir, *, ssh_host=None, local=False, skip_eval=False, dry_run=False,
           dataset="humaneval", base_only=False, image=None,
           cpus="2", memory="4g", pids_limit=256, timeout=1800, parallel=None,
-          ssh_workdir="/tmp") -> dict:
+          ssh_workdir="/tmp", option_overrides=None) -> dict:
     run_dir = Path(run_dir)
     manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
-    bench = get_benchmark(manifest.get("benchmark", "humaneval_plus"), **manifest.get("benchmark_options", {}))
+    # Benchmark options are pinned at generation time in the manifest. `option_overrides` lets the
+    # score step re-instantiate with a narrower config WITHOUT regenerating — e.g. a LiveCodeBench
+    # contest-date window (start_date/end_date) to score a post-cutoff subset of an already-generated
+    # full run. Overrides win over the manifest values.
+    opts = dict(manifest.get("benchmark_options", {}))
+    opts.update(option_overrides or {})
+    bench = get_benchmark(manifest.get("benchmark", "humaneval_plus"), **opts)
     image = image or bench.sandbox_image     # each benchmark declares its hardened scoring image
     sandbox = None
     if not skip_eval:
@@ -162,6 +199,8 @@ def main() -> None:
     g.add_argument("--local", action="store_true", help="use local Docker for the multi_turn sandbox")
     g.add_argument("--dry-run", action="store_true",
                    help="multi_turn: print sandbox commands without executing")
+    g.add_argument("--resume", default=None,
+                   help="resume an existing run dir: skip already-recorded tasks and append")
 
     s = sub.add_parser("score", help="score a generation run dir in the sandbox")
     s.add_argument("run_dir", type=Path)
@@ -178,6 +217,11 @@ def main() -> None:
     s.add_argument("--base_only", action="store_true")
     s.add_argument("--skip-eval", action="store_true")
     s.add_argument("--dry-run", action="store_true")
+    s.add_argument("--start-date", default=None,
+                   help="LiveCodeBench: score only problems with contest_date >= YYYY-MM-DD "
+                        "(post-cutoff subset of an already-generated full run)")
+    s.add_argument("--end-date", default=None,
+                   help="LiveCodeBench: score only problems with contest_date <= YYYY-MM-DD")
 
     args = ap.parse_args()
 
@@ -186,14 +230,20 @@ def main() -> None:
         spec = yaml.safe_load(args.spec.read_text(encoding="utf-8"))
         generate(spec, limit=args.limit, concurrency=args.concurrency,
                  ssh_host=args.ssh_host, local=args.local, dry_run=args.dry_run)
+        generate(spec, limit=args.limit, concurrency=args.concurrency, resume=args.resume)
     else:  # score
         if not args.local and not args.ssh_host and not args.skip_eval:
             ap.error("score: pass --ssh-host <host> or --local (or --skip-eval to re-merge only)")
+        overrides = {}
+        if args.start_date:
+            overrides["start_date"] = args.start_date
+        if args.end_date:
+            overrides["end_date"] = args.end_date
         summary = score(args.run_dir, ssh_host=args.ssh_host, local=args.local,
                         skip_eval=args.skip_eval, dry_run=args.dry_run, dataset=args.dataset,
                         base_only=args.base_only, image=args.image, cpus=args.cpus, memory=args.memory,
                         pids_limit=args.pids_limit, timeout=args.timeout, parallel=args.parallel,
-                        ssh_workdir=args.ssh_workdir)
+                        ssh_workdir=args.ssh_workdir, option_overrides=overrides or None)
         if not args.dry_run:
             print("\n=== score summary ===")
             for k, v in summary.items():
