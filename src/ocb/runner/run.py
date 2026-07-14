@@ -57,8 +57,6 @@ def _build_gen_sandbox(bench, spec: dict, *, ssh_host=None, local=False, dry_run
         ssh_workdir=sb.get("ssh_workdir", "/tmp"), local=is_local, dry_run=dry_run)
 
 
-def generate(spec: dict, *, limit: int | None = None, concurrency: int | None = None,
-             ssh_host=None, local=False, dry_run=False) -> list[str]:
 def _recorded_task_ids(out: Path) -> set[str]:
     """task_ids already present in records.jsonl (any status) — used to skip on resume so a
     restarted generation is idempotent and never double-writes a task (D12)."""
@@ -69,7 +67,7 @@ def _recorded_task_ids(out: Path) -> set[str]:
 
 
 def generate(spec: dict, *, limit: int | None = None, concurrency: int | None = None,
-             resume: str | None = None) -> list[str]:
+             resume: str | None = None, ssh_host=None, local=False, dry_run=False) -> list[str]:
     opts = dict(spec.get("options", {}))   # benchmark-specific (e.g. BigCodeBench split/subset)
     bench = get_benchmark(spec["benchmark"], **opts)
     all_tasks = bench.load_dataset(0)
@@ -91,7 +89,8 @@ def generate(spec: dict, *, limit: int | None = None, concurrency: int | None = 
         print(f"resume run_id={run_id}  model={model}  ({len(done)} already done, "
               f"{len(todo)} to go, concurrency={conc})")
         if todo:
-            _generate_model(bench, client, todo, model, sampling, run_id, out, conc, append=True)
+            _generate_model(bench, client, todo, model, sampling, run_id, out, conc,
+                            append=True, sandbox=sandbox)
         else:
             print(f"nothing to resume for {run_id}: all {len(tasks)} tasks recorded")
         return [run_id]
@@ -121,10 +120,7 @@ def generate(spec: dict, *, limit: int | None = None, concurrency: int | None = 
 
 
 def _generate_model(bench, client, tasks, model, sampling, run_id, out: Path, conc: int,
-                    sandbox=None) -> None:
-    records_f = (out / "records.jsonl").open("w", encoding="utf-8")
-    samples_f = (out / "samples.jsonl").open("w", encoding="utf-8")
-                    append: bool = False) -> None:
+                    append: bool = False, sandbox=None) -> None:
     mode = "a" if append else "w"   # append preserves prior records/samples when resuming
     records_f = (out / "records.jsonl").open(mode, encoding="utf-8")
     samples_f = (out / "samples.jsonl").open(mode, encoding="utf-8")
@@ -228,9 +224,8 @@ def main() -> None:
     if args.op == "generate":
         import yaml
         spec = yaml.safe_load(args.spec.read_text(encoding="utf-8"))
-        generate(spec, limit=args.limit, concurrency=args.concurrency,
+        generate(spec, limit=args.limit, concurrency=args.concurrency, resume=args.resume,
                  ssh_host=args.ssh_host, local=args.local, dry_run=args.dry_run)
-        generate(spec, limit=args.limit, concurrency=args.concurrency, resume=args.resume)
     else:  # score
         if not args.local and not args.ssh_host and not args.skip_eval:
             ap.error("score: pass --ssh-host <host> or --local (or --skip-eval to re-merge only)")
