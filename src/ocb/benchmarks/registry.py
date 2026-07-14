@@ -7,10 +7,12 @@ from __future__ import annotations
 from ocb.benchmarks.base import Benchmark
 from ocb.benchmarks.bigcodebench import BigCodeBench
 from ocb.benchmarks.humaneval_plus import HumanEvalPlus
+from ocb.benchmarks.livecodebench import LiveCodeBench
 
 _REGISTRY: dict[str, type[Benchmark]] = {
     HumanEvalPlus.name: HumanEvalPlus,
     BigCodeBench.name: BigCodeBench,
+    LiveCodeBench.name: LiveCodeBench,
 }
 
 

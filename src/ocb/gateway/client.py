@@ -26,9 +26,12 @@ class Completion:
 
 
 class GatewayClient:
-    def __init__(self, base_url: str, api_key: str = "sk-noauth"):
+    def __init__(self, base_url: str, api_key: str = "sk-noauth", timeout: float = 1800.0):
         # No real auth: the gateway is open on 127.0.0.1 (see litellm/config.yaml).
-        self._client = OpenAI(base_url=base_url, api_key=api_key)
+        # timeout defaults high: self-hosted 32B on the GB10 runs ~3.6 tok/s, so a generation
+        # near max_tokens takes ~570s — the OpenAI SDK's 600s default would clip it as a
+        # transport error (must match the gateway's request_timeout).
+        self._client = OpenAI(base_url=base_url, api_key=api_key, timeout=timeout)
 
     def complete(self, messages, *, model: str, temperature: float, max_tokens: int,
                  run_id: str, benchmark: str, task_id: str, sample_index: int = 0,

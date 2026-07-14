@@ -40,7 +40,7 @@ model_list:
 
 litellm_settings:
   drop_params: true        # cross-provider robustness; see the VERIFY caveat above
-  request_timeout: 600     # the Pi is slow; allow long generations
+  request_timeout: 1800    # Pi + 32B-on-GB10 are slow (~3.6 tok/s); a near-max_tokens gen ~570s, allow headroom
 
 # No master_key: the proxy is open, which is safe ONLY with the 127.0.0.1 bind
 # (serve-gateway.ps1 default). When cloud keys arrive, add general_settings.master_key

@@ -11,6 +11,10 @@ __pycache__/
 # Run artifacts (Postgres is the system of record; these are exports)
 runs/
 
+# LiveCodeBench dataset files baked into the exec-lcb build context (~4.4GB) — populated locally
+# per docker/exec-lcb/Dockerfile's header comment, not committed.
+docker/exec-lcb/lcb-data/
+
 # Internal docs (design + working notes)
 docs/
 
