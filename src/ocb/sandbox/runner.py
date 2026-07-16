@@ -24,6 +24,24 @@ from pathlib import Path
 _SETUP_TIMEOUT = 120
 
 
+def _make_world_writable(root: Path) -> None:
+    """Grant world rwx across a local work tree before bind-mounting it into the container.
+
+    The exec image runs as non-root `poly` (uid 1000), but a locally-created work dir is owned by
+    the host user, whose uid need not be 1000 — so compilers writing build artifacts under /work
+    (cargo -> Cargo.lock/target, cmake -> build/, go -> go.sum) get EACCES. Adding o+rwx lets
+    `poly` write regardless of host uid. This mirrors the `chmod 777` the SSH path already applies
+    to its remote work dir; it's only needed on the local path. chmod bits are effectively ignored
+    on Windows, which is harmless since only local Linux Docker exercises this."""
+    paths = [root, *root.rglob("*")]
+    for p in paths:
+        try:
+            mode = p.stat().st_mode
+            p.chmod(mode | (0o777 if p.is_dir() else 0o666))
+        except OSError:
+            pass   # best-effort; a chmod failure surfaces later as the real test error
+
+
 class SandboxRunner:
     def __init__(self, image: str, *, cpus: str = "2", memory: str = "4g",
                  pids_limit: int = 256, read_only: bool = True, auto_confirm: bool = False,
@@ -55,7 +73,9 @@ class SandboxRunner:
             "--network=none",                 # untrusted code gets no network
             "--cap-drop=ALL",                 # drop every Linux capability
             "--security-opt=no-new-privileges",
-            "--tmpfs", "/tmp:rw,size=512m",   # writable scratch
+            "--tmpfs", "/tmp:rw,exec,size=512m",   # writable scratch; `exec` so compiled test
+            #                                        binaries (Go writes /tmp/go-build*, then execs
+            #                                        it) can run — Docker's tmpfs defaults to noexec.
             "--pids-limit", str(self.pids_limit),
             "--cpus", self.cpus,
             "--memory", self.memory,
@@ -109,7 +129,19 @@ class SandboxRunner:
             print("[sandbox] local Docker (capture): $ " + " ".join(shlex.quote(a) for a in argv))
             if self.dry_run:
                 return (0, "[dry-run] not executed")
+            _make_world_writable(work_dir)   # container runs as non-root `poly`; see helper
             p = subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
+            # The container wrote build artifacts under /work as `poly` (uid 1000); a host user with
+            # a different uid can't delete them, which would crash temp-dir cleanup. A throwaway root
+            # container chmods the whole tree removable. Best-effort: never let cleanup-prep mask the
+            # real test result (the plugin's TemporaryDirectory also ignores residual cleanup errors).
+            try:
+                subprocess.run(["docker", "run", "--rm", "--network=none", "--user", "0:0",
+                                "-v", f"{work_dir.resolve()}:/work", self.image,
+                                "chmod", "-R", "a+rwX", "/work"],
+                               capture_output=True, timeout=60)
+            except Exception:
+                pass
             return (p.returncode, (p.stdout or "") + (p.stderr or ""))
 
         # SSH: tar the tree locally (stdlib tarfile — no external `tar` needed on Windows), scp it,

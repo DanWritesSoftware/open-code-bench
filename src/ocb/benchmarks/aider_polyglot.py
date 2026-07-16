@@ -78,6 +78,32 @@ def _normalize_path_line(s: str) -> str:
     return s
 
 
+def _enable_all_tests(work: Path, lang: str, test_files: list[str]) -> None:
+    """Un-skip the tests Exercism ships disabled so the WHOLE suite runs (a benchmark must grade
+    every case, not just the first). Exercism's "un-skip as you progress" convention marks the
+    trailing tests as skipped: JavaScript uses xit()/xtest() (and *.skip()), Java annotates them
+    @Disabled. Rewrite the (already-restored, pristine) test files in place to remove those markers.
+    go/python/rust ship no such convention; cpp is handled by -DEXERCISM_RUN_ALL_TESTS in
+    cpp-test.sh. This mirrors how the canonical aider polyglot benchmark enables all tests."""
+    for rp in test_files:
+        f = work / rp
+        if not f.is_file():
+            continue
+        txt = f.read_text(encoding="utf-8")
+        if lang == "javascript":
+            new = re.sub(r"\bx(it|test)\s*\(", r"\1(", txt)          # xit(/xtest(  -> it(/test(
+            new = re.sub(r"\b(it|test|describe)\.skip\s*\(", r"\1(", new)   # .skip( -> active
+        elif lang == "java":
+            # Drop the @Disabled annotation (Exercism puts it on its own line above @Test), with or
+            # without a "(reason)" argument; leave the now-unused import (a harmless warning).
+            new = re.sub(r"^[ \t]*@Disabled\b[^\n]*\n", "", txt, flags=re.MULTILINE)
+            new = re.sub(r"@Disabled\s*(\([^)]*\))?", "", new)      # any inline occurrence
+        else:
+            continue
+        if new != txt:
+            f.write_text(new, encoding="utf-8")
+
+
 def _parse_whole_file_edits(completion: str, solution_files: list[str]) -> dict[str, str]:
     """Recover {relpath: new_content} from a whole-file-format completion.
 
@@ -147,7 +173,7 @@ class AiderPolyglot(Benchmark):
         "python": "python -m pytest -q {tests}",
         "go": "go test ./...",
         "rust": "cargo test --offline -- --include-ignored",
-        "java": "./gradlew test --offline --no-daemon --console=plain",
+        "java": "gradle test --offline --no-daemon --console=plain",
         "javascript": "/opt/ocb/js-test.sh",
         "cpp": "/opt/ocb/cpp-test.sh",
     }
@@ -273,7 +299,11 @@ class AiderPolyglot(Benchmark):
         passed = False
         passed_on = None
 
-        with tempfile.TemporaryDirectory(prefix="ocb-polyglot-") as tmp:
+        # ignore_cleanup_errors: in local-Docker mode the container writes build artifacts under
+        # /work as the image's non-root `poly` (uid 1000); if a host uid mismatch leaves any of
+        # those un-removable, cleanup must not raise and abort the task after tests already ran
+        # (the sandbox also chmods the tree removable post-run; this is the backstop).
+        with tempfile.TemporaryDirectory(prefix="ocb-polyglot-", ignore_cleanup_errors=True) as tmp:
             work = Path(tmp) / task.data["exercise"]
             shutil.copytree(d["dir"], work, dirs_exist_ok=True,
                             ignore=shutil.ignore_patterns(".git"))
@@ -309,6 +339,10 @@ class AiderPolyglot(Benchmark):
                     if src.is_file():
                         (work / rp).parent.mkdir(parents=True, exist_ok=True)
                         shutil.copyfile(src, work / rp)
+                # Exercism ships most tests disabled ("un-skip as you progress"); a benchmark must run
+                # the WHOLE suite. Re-enable them on the restored copies each attempt (cpp is handled
+                # separately via -DEXERCISM_RUN_ALL_TESTS in cpp-test.sh).
+                _enable_all_tests(work, task.data["language"], d["test_files"])
 
                 if not edits:
                     rec.update({"test_exit": None, "test_passed": False,

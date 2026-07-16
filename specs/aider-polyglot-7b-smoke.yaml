@@ -1,0 +1,33 @@
+# SMOKE spec for the Aider polyglot exec image (ocb-polyglot-exec:0.1.0) — qwen-spark-7b.
+#
+# Purpose: validate that each of the six toolchains runs the edit->test->feedback loop end-to-end
+# inside the freshly-built image, ONE exercise per language, isolating any per-toolchain failure
+# (the Dockerfile flags JS jest/babel and Java gradle-offline as the likely breakers).
+#
+# WHY per-language: AiderPolyglot.load_dataset() returns tasks[:limit] over a list built in
+# `languages` order, so a global `limit` just front-loads the first language. To hit all six we run
+# this spec once per language, flipping the single value on the `languages:` line below:
+#   for lang in cpp go java javascript python rust:
+#     (set languages: [<lang>]) then
+#     .\.venv\Scripts\python.exe -m ocb.runner.run generate specs\aider-polyglot-7b-smoke.yaml --ssh-host sandbox
+# Tip: add --dry-run once to eyeball the exact sandbox `docker run` before executing for real.
+benchmark: aider_polyglot
+options:
+  repo_path: datasets/polyglot-benchmark
+  tries: 2
+  per_test_timeout: 300
+  languages: [cpp]         # SMOKE: flip to [go] / [java] / [javascript] / [python] / [rust] per run
+models:
+  - qwen-spark-7b
+sampling:
+  temperature: 0.0
+  max_tokens: 3072
+  num_ctx: 8192            # Ollama-only; ignored by vLLM
+limit: 1                   # SMOKE: one exercise from the selected language
+concurrency: 1             # SMOKE: serialize so failures are easy to read
+gateway: http://localhost:4000/v1
+sandbox:
+  ssh_host: sandbox        # CLI --ssh-host overrides this
+  memory: 8g
+  pids_limit: 2048
+  ssh_workdir: /tmp

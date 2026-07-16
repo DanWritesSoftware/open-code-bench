@@ -1,9 +1,22 @@
-// Throwaway project built once at image-build time (network on) to warm ~/.gradle with the JUnit5
-// stack Exercism Java exercises use, so runtime `./gradlew test --offline` resolves from cache.
-plugins { id 'java' }
-repositories { mavenCentral() }
+// Throwaway project built AND tested once at image-build time (network on) to warm ~/.gradle with
+// the JUnit5 stack Exercism Java exercises use, so runtime `gradle test --offline` resolves from
+// cache. Mirrors the exercises' build.gradle exactly (same dep versions + useJUnitPlatform) and
+// ships a trivial test so `gradle test` actually downloads every runtime jar — the platform
+// launcher/engine + assertj artifacts that `gradle dependencies` (metadata only) never fetches.
+plugins {
+    id "java"
+}
+
+repositories {
+    mavenCentral()
+}
+
 dependencies {
-    testImplementation platform('org.junit:junit-bom:5.10.2')
-    testImplementation 'org.junit.jupiter:junit-jupiter'
-    testImplementation 'org.assertj:assertj-core:3.25.3'
+    testImplementation platform("org.junit:junit-bom:5.10.0")
+    testImplementation "org.junit.jupiter:junit-jupiter"
+    testImplementation "org.assertj:assertj-core:3.25.1"
+}
+
+test {
+    useJUnitPlatform()
 }
